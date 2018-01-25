@@ -1,7 +1,8 @@
 .stack-work/
 d.cabal
 *~
+static/bundle.js
+dist/
 node_modules
-dist
 *.swp
 *.swo
