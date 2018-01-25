@@ -1,0 +1,30 @@
+name:                d
+version:             0.1.0.0
+github:              "fiatjaf/d"
+license:             BSD3
+author:              "Giovanni T. Parra"
+maintainer:          "fiatjaf@gmail.com"
+copyright:           "Giovanni T. Parra"
+
+description:         Please see the README on Github at <https://github.com/fiatjaf/d#readme>
+
+dependencies:
+- base >= 4.7 && < 5
+
+library:
+  source-dirs: src
+
+executables:
+  d-exe:
+    main:                Main.hs
+    source-dirs:         app
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - d
+    - miso
+    - text
+    - hledger-lib
+    - ghcjs-base
