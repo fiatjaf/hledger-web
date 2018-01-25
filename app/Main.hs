@@ -7,6 +7,7 @@ import Debug.Trace
 import Data.Text hiding (pack, map)
 import Hledger.Read (readJournal)
 import Hledger.Data.Journal
+import Hledger.Data.Transaction
 import Hledger.Data.Types (Journal)
 import GHCJS.Types
 import Miso
@@ -60,16 +61,23 @@ viewModel Model {..} = div_ []
       Just err -> text $ toMisoString err
     ]
   , div_ []
-    [ case journal of
-      Nothing -> text $ pack ""
+    $ case journal of
+      Nothing -> []
       Just jrnl ->
-        div_ []
-        [ h1_ [] [ text $ pack "account names" ]
-        , ul_ []
-          $ map (li_ [] . (:[]) . text . toMisoString) (journalAccountNames jrnl)
+        [ div_ []
+          [ h1_ [] [ text $ pack "account names" ]
+          , ul_ []
+            $ map (li_ [] . (:[]) . text . toMisoString) (journalAccountNames jrnl)
+          ]
+        , div_ []
+          [ h1_ [] [ text $ pack "first transaction" ]
+          , ul_ []
+            [ case journalTransactionAt jrnl 1 of
+              Nothing -> text $ pack ""
+              Just txn -> pre_ [] [ text $ toMisoString (showTransaction txn) ]
+            ]
+          ]
         ]
-        
-    ]
   ]
 
 -- foreign import javascript unsafe "$r = new RemoteStorage({logging: true})"
