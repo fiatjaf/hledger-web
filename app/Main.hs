@@ -18,6 +18,7 @@ data Model
   = Model
     { unparsed :: MisoString
     , journal :: Maybe Journal
+    , status :: Maybe MisoString
     , err :: Maybe MisoString
     } deriving (Eq, Show)
 
@@ -25,7 +26,7 @@ main :: IO ()
 main = startApp App {..}
   where
     initialAction = ParseJournal
-    model  = Model initialJournal Nothing Nothing
+    model  = Model initialJournal Nothing Nothing Nothing
     update = updateModel
     view   = viewModel
     events = defaultEvents
@@ -41,39 +42,59 @@ data Action
 
 updateModel :: Action -> Model -> Effect Action Model
 updateModel NoOp m = noEff m
-updateModel (SetUnparsedJournal uj) m =
-  updateModel ParseJournal m { unparsed = uj }
-updateModel ParseJournal (Model {..}) = Model {..} <# do
-  putStr (fromMisoString unparsed)
+updateModel (SetUnparsedJournal uj) m = updateModel ParseJournal m { unparsed = uj }
+updateModel ParseJournal (Model {..}) =
+  Model
+    { status = Just $ pack "parsing journal..."
+    , ..
+    } <# do
   ParsedJournal <$> parseJournal unparsed
-updateModel (ParsedJournal res) m = noEff updatedModel
+updateModel (ParsedJournal res) m = noEff updated
   where
-    updatedModel = case res of
-      Left err -> m { err = Just $ pack err }
-      Right jrnl -> m { journal = Just jrnl }
+    updated = case res of
+      Left err -> m
+        { err = Just $ pack err
+        , journal = Nothing
+        , status = Just $ pack "encountered error while parsing."
+        }
+      Right jrnl -> m
+        { journal = Just jrnl
+        , err = Nothing
+        , status = Just $ pack "finished parsing."
+        }
 
 viewModel :: Model -> View Action
 viewModel Model {..} = div_ []
-  [ div_ []
-    [ case err of
-      Nothing -> text $ pack "no errors" 
-      Just err -> text $ toMisoString err
-    ]
-  , div_ []
-    [ div_ []
-      [ textarea_ [ onInput SetUnparsedJournal ] [ text unparsed ]
+  [ div_ [ class_ "columns" ]
+    [ div_ [ class_ "column" ]
+      [ case err of
+        Nothing -> text $ pack "" 
+        Just err -> text err
       ]
-    , div_ []
+    , div_ [ class_ "column" ]
+      [ case status of
+        Nothing -> text $ pack ""
+        Just st -> text st
+      ]
+    ]
+  , div_ [ class_ "columns" ]
+    [ div_ [ class_ "column" ]
+      [ textarea_
+        [ onInput SetUnparsedJournal
+        , class_ "textarea"
+        ] [ text unparsed ]
+      ]
+    , div_ [ class_ "column" ]
       $ case journal of
         Nothing -> []
         Just jrnl ->
           [ div_ []
-            [ h1_ [] [ text $ pack "account names" ]
+            [ h4_ [ class_ "title is-4" ] [ text $ pack "account names" ]
             , ul_ []
               $ map (li_ [] . (:[]) . text . toMisoString) (journalAccountNames jrnl)
             ]
           , div_ []
-            [ h1_ [] [ text $ pack "first transaction" ]
+            [ h4_ [ class_ "title is-4" ] [ text $ pack "first transaction" ]
             , ul_ []
               [ case journalTransactionAt jrnl 1 of
                 Nothing -> text $ pack ""
@@ -95,7 +116,7 @@ viewModel Model {..} = div_ []
 
 parseJournal :: MisoString -> IO (Either String Journal)
 parseJournal jrnl =
-  readJournal (Just "journal") Nothing True Nothing (fromMisoString jrnl)
+  readJournal (Just "journal") Nothing False Nothing (fromMisoString jrnl)
 
 initialJournal :: MisoString
 initialJournal = toMisoString $ unlines
