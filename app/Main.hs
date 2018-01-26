@@ -5,6 +5,7 @@ module Main where
 
 import Debug.Trace
 import Prelude hiding (unlines)
+import Control.Concurrent
 import Data.Text hiding (pack, map)
 import Hledger.Read (readJournal)
 import Hledger.Data.Journal
@@ -20,18 +21,20 @@ data Model
     , journal :: Maybe Journal
     , status :: Maybe MisoString
     , err :: Maybe MisoString
+    , waitingDebounced :: Int
     } deriving (Eq, Show)
 
 main :: IO ()
 main = startApp App {..}
   where
     initialAction = ParseJournal
-    model  = Model initialJournal Nothing Nothing Nothing
+    model  = Model initialJournal Nothing Nothing Nothing 0
     update = updateModel
     view   = viewModel
     events = defaultEvents
     mountPoint = Nothing
     subs   = []
+
 
 data Action
   = NoOp
@@ -41,14 +44,28 @@ data Action
   deriving (Show, Eq)
 
 updateModel :: Action -> Model -> Effect Action Model
+
 updateModel NoOp m = noEff m
-updateModel (SetUnparsedJournal uj) m = updateModel ParseJournal m { unparsed = uj }
+
+updateModel (SetUnparsedJournal uj) (Model {..}) =
+  Model
+    { unparsed = uj
+    , waitingDebounced = waitingDebounced + 1
+    , ..
+    } <# do
+      threadDelay 800000 -- 0.8s
+      pure ParseJournal
+
 updateModel ParseJournal (Model {..}) =
   Model
     { status = Just $ pack "parsing journal..."
+    , waitingDebounced = waitingDebounced - 1
     , ..
     } <# do
-  ParsedJournal <$> parseJournal unparsed
+      if waitingDebounced == 0
+        then ParsedJournal <$> parseJournal unparsed
+        else pure NoOp
+
 updateModel (ParsedJournal res) m = noEff updated
   where
     updated = case res of
@@ -60,8 +77,9 @@ updateModel (ParsedJournal res) m = noEff updated
       Right jrnl -> m
         { journal = Just jrnl
         , err = Nothing
-        , status = Just $ pack "finished parsing."
+        , status = Just $ pack "finished parsing!"
         }
+
 
 viewModel :: Model -> View Action
 viewModel Model {..} = div_ []
