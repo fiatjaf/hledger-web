@@ -2,7 +2,7 @@
   "scripts": {
     "watch-js": "ls *.js | entr browserifyinc -vd app.js -o static/bundle.js",
     "build-js": "browserify -vd app.js -o dist/bundle.js",
-    "predeploy": "mkdir -p dist && npm run build-js && cp static/index.html dist/ && cp .stack-work/dist/x86_64-linux/Cabal-1.24.2.0_ghcjs/build/d-exe/d-exe.jsexe/*.js dist/",
+    "predeploy": "mkdir -p dist && npm run build-js && cp static/index.html static/style.css dist/ && cp .stack-work/dist/x86_64-linux/Cabal-1.24.2.0_ghcjs/build/d-exe/d-exe.jsexe/*.js dist/",
     "deploy": "surge dist/ --domain mostly-fiction.surge.sh"
   },
   "dependencies": {
