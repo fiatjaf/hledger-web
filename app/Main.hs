@@ -7,7 +7,6 @@ import Debug.Trace
 import Prelude hiding (unlines)
 import Unsafe.Coerce
 import Control.Concurrent
-import Control.Applicative
 import Data.Text hiding (pack, map)
 import Hledger.Read (readJournal)
 import Hledger.Data.Journal
@@ -53,9 +52,10 @@ main = do
 data Action
   = NoOp
   | FetchInitial
-  | GotValue Text Text
+  | GotValue (Text, Text)
   | SetUnparsedJournal MisoString
-  | ParseJournal
+  | MaybeParseJournal
+  | ImmediatelyParseJournal
   | ParsedJournal (Either String Journal)
   | SaveCurrent
   deriving (Show, Eq)
@@ -65,31 +65,40 @@ updateModel NoOp m = noEff m
 
 updateModel FetchInitial m = m <# do
   rsGet "main.journal"
-  pure ParseJournal
+  pure ImmediatelyParseJournal
 
-updateModel (GotValue path contents) m = noEff m
-  { journalSource = toMisoString $ traceShow path contents
-  }
+updateModel (GotValue (path, contents)) m =
+  let jnrl = toMisoString contents
+  in m
+    { journalSource = jnrl
+    , currentlySaved = jnrl
+    } <# do
+      pure ImmediatelyParseJournal
 
 updateModel (SetUnparsedJournal uj) (Model {..}) =
   Model
     { journalSource = uj
     , waitingDebounced = waitingDebounced + 1
-    , status = Just "waiting to parse..."
+    , status = Just $ toMisoString $ Data.Text.concat
+      [ "waiting to parse..."
+      , Data.Text.pack $ show $ waitingDebounced + 1
+      ]
     , ..
     } <# do
       threadDelay 800000 -- 0.8s
-      pure ParseJournal
+      pure MaybeParseJournal
 
-updateModel ParseJournal (Model {..}) =
-  Model
-    { status = Just $ pack "parsing journal..."
-    , waitingDebounced = waitingDebounced - 1
-    , ..
-    } <# do
-      if waitingDebounced == 0
-        then ParsedJournal <$> parseJournal journalSource
+updateModel MaybeParseJournal (Model {..}) =
+  Model { waitingDebounced = waitingDebounced - 1, .. }
+    <# do
+      if waitingDebounced == 1
+        then pure ImmediatelyParseJournal
         else pure NoOp
+
+updateModel ImmediatelyParseJournal (Model {..}) =
+  Model { status = Just $ pack "parsing journal...", .. }
+    <# do
+      ParsedJournal <$> parseJournal journalSource
 
 updateModel (ParsedJournal res) m = noEff updated
   where
@@ -106,10 +115,7 @@ updateModel (ParsedJournal res) m = noEff updated
         }
 
 updateModel SaveCurrent (Model {..}) = Model {..} <# do
-  putStrLn "saving"
   rsPut "main.journal" (fromMisoString journalSource)
-  putStrLn "saved"
-  print journalSource
   pure NoOp
 
 viewModel :: Model -> View Action
@@ -213,6 +219,4 @@ getSub _ = \sink -> do
       putStrLn "got val"
       let path = Data.Text.pack $ Data.JSString.unpack ((unsafeCoerce p)::JSString)
       let contents = Data.Text.pack $ Data.JSString.unpack ((unsafeCoerce v)::JSString)
-      print path
-      print contents
-      sink (GotValue path contents)
+      sink $ GotValue (path, contents)
