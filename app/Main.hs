@@ -5,19 +5,26 @@ module Main where
 
 import Debug.Trace
 import Prelude hiding (unlines)
+import Unsafe.Coerce
 import Control.Concurrent
+import Control.Applicative
 import Data.Text hiding (pack, map)
 import Hledger.Read (readJournal)
 import Hledger.Data.Journal
 import Hledger.Data.Transaction
 import Hledger.Data.Types (Journal)
 import GHCJS.Types
+import GHCJS.Foreign.Callback
 import Miso
 import Miso.String (pack, toMisoString, fromMisoString, MisoString)
 
+import qualified Data.JSString
+import qualified Data.Text
+
 data Model
   = Model
-    { unparsed :: MisoString
+    { journalSource :: MisoString
+    , currentlySaved :: MisoString
     , journal :: Maybe Journal
     , status :: Maybe MisoString
     , err :: Maybe MisoString
@@ -25,32 +32,50 @@ data Model
     } deriving (Eq, Show)
 
 main :: IO ()
-main = startApp App {..}
+main = do
+  startApp App {..}
   where
-    initialAction = ParseJournal
-    model  = Model initialJournal Nothing Nothing Nothing 0
-    update = updateModel
-    view   = viewModel
-    events = defaultEvents
-    mountPoint = Nothing
-    subs   = []
-
+    initialAction = FetchInitial
+    model         = Model
+      { journalSource    = initialJournal
+      , currentlySaved   = initialJournal
+      , journal          = Nothing
+      , status           = Nothing
+      , err              = Nothing
+      , waitingDebounced = 0
+      }
+    update        = updateModel
+    view          = viewModel
+    events        = defaultEvents
+    mountPoint    = Nothing
+    subs          = [ getSub ]
 
 data Action
   = NoOp
+  | FetchInitial
+  | GotValue Text Text
   | SetUnparsedJournal MisoString
   | ParseJournal
   | ParsedJournal (Either String Journal)
+  | SaveCurrent
   deriving (Show, Eq)
 
 updateModel :: Action -> Model -> Effect Action Model
-
 updateModel NoOp m = noEff m
+
+updateModel FetchInitial m = m <# do
+  rsGet "main.journal"
+  pure ParseJournal
+
+updateModel (GotValue path contents) m = noEff m
+  { journalSource = toMisoString $ traceShow path contents
+  }
 
 updateModel (SetUnparsedJournal uj) (Model {..}) =
   Model
-    { unparsed = uj
+    { journalSource = uj
     , waitingDebounced = waitingDebounced + 1
+    , status = Just "waiting to parse..."
     , ..
     } <# do
       threadDelay 800000 -- 0.8s
@@ -63,7 +88,7 @@ updateModel ParseJournal (Model {..}) =
     , ..
     } <# do
       if waitingDebounced == 0
-        then ParsedJournal <$> parseJournal unparsed
+        then ParsedJournal <$> parseJournal journalSource
         else pure NoOp
 
 updateModel (ParsedJournal res) m = noEff updated
@@ -80,10 +105,32 @@ updateModel (ParsedJournal res) m = noEff updated
         , status = Just $ pack "finished parsing!"
         }
 
+updateModel SaveCurrent (Model {..}) = Model {..} <# do
+  putStrLn "saving"
+  rsPut "main.journal" (fromMisoString journalSource)
+  putStrLn "saved"
+  print journalSource
+  pure NoOp
 
 viewModel :: Model -> View Action
 viewModel Model {..} = div_ []
-  [ div_ [ class_ "columns" ]
+  [ nav_ [ class_ "navbar" ]
+    [ div_ [ class_ "navbar-brand" ]
+      [ a_ [ class_ "navbar-item" ] [ text $ pack "d" ]
+      , div_ [ class_ "navbar-burger" ]
+        [ span_ [] []
+        , span_ [] []
+        , span_ [] []
+        ]
+      ]
+    , div_ [ class_ "navbar-menu" ]
+      [ div_ [ class_ "navbar-start" ] []
+      , div_ [ class_ "navbar-end" ]
+        [ a_ [ class_ "navbar-item" ] [ text $ pack "~" ]
+        ]
+      ]
+    ]
+  , div_ [ class_ "columns" ]
     [ div_ [ class_ "column" ]
       [ case err of
         Nothing -> text $ pack "" 
@@ -100,7 +147,12 @@ viewModel Model {..} = div_ []
       [ textarea_
         [ onInput SetUnparsedJournal
         , class_ "textarea"
-        ] [ text unparsed ]
+        ] [ text journalSource ]
+      , button_
+        [ class_ "button is-primary"
+        , disabled_ $ currentlySaved == journalSource
+        , onClick SaveCurrent
+        ] [ text $ pack "Save" ]
       ]
     , div_ [ class_ "column" ]
       $ case journal of
@@ -123,14 +175,21 @@ viewModel Model {..} = div_ []
     ]
   ]
 
--- foreign import javascript unsafe "$r = new RemoteStorage({logging: true})"
---   newRS :: IO JSVal
--- 
--- foreign import javascript unsafe "$1.access.claim($2, 'rw')"
---   rsClaim :: JSVal -> Text -> IO ()
--- 
--- foreign import javascript unsafe "$1.caching.enable($2)"
---   rsCache :: JSVal -> Text -> IO ()
+foreign import javascript unsafe
+  "setGetHandler($1)"
+  onGet :: Callback (JSVal -> JSVal -> IO ()) -> IO ()
+
+foreign import javascript unsafe
+  "client.getFile($1).then(function (res) { getHandler($1, res.data) })"
+  rsGet :: JSString -> IO ()
+
+foreign import javascript unsafe
+  "client.storeFile('text/plain', $1, $2)"
+  rsPut :: JSString -> JSString -> IO ()
+
+foreign import javascript unsafe
+  "client.remove($1)"
+  rsDel :: JSString -> IO ()
 
 parseJournal :: MisoString -> IO (Either String Journal)
 parseJournal jrnl =
@@ -146,3 +205,14 @@ initialJournal = toMisoString $ unlines
   , "  assets:money  -12"
   , "  expenses:food"
   ]
+
+getSub :: Sub Action Model
+getSub _ = \sink -> do
+  onGet =<< do
+    asyncCallback2 $ \p v -> do
+      putStrLn "got val"
+      let path = Data.Text.pack $ Data.JSString.unpack ((unsafeCoerce p)::JSString)
+      let contents = Data.Text.pack $ Data.JSString.unpack ((unsafeCoerce v)::JSString)
+      print path
+      print contents
+      sink (GotValue path contents)
