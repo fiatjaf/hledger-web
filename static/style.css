@@ -1,5 +1,6 @@
 textarea {
   min-height: 72vh !important;
+  font-family: monospace;
 }
 
 @media screen and (max-width: 1023px) {
@@ -26,8 +27,20 @@ textarea {
 }
 
 .account-tree {
-  margin-bottom: 12px !important;
+  margin-top: 6px !important;
+  margin-bottom: 10px !important;
+  font-family: monospace;
 }
-.account-tree .column {
-  padding-top: 0;
-}
+  .account-tree .columns:hover {
+    background: #f9ebcb;
+  }
+  .account-tree .column {
+    padding-top: 0.3em;
+    padding-bottom: 0.4em;
+  }
+  .account-tree .name {
+    white-space: pre-wrap;
+  }
+  .account-tree .amount {
+    text-align: right;
+  }

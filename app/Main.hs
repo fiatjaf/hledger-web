@@ -4,13 +4,14 @@
 module Main where
 
 import Debug.Trace
-import Prelude hiding (unlines)
-import Unsafe.Coerce
+import Prelude hiding (unlines, replicate)
 import Control.Concurrent
 import Data.Text hiding (pack, map)
 import Data.Function
+import Data.JSString.Text (textFromJSVal)
 import Hledger.Read (readJournal)
 import Hledger.Data.Account
+import Hledger.Data.AccountName
 import Hledger.Data.Journal
 import Hledger.Data.Transaction
 import Hledger.Data.Types
@@ -19,7 +20,6 @@ import GHCJS.Foreign.Callback
 import Miso
 import Miso.String (pack, toMisoString, fromMisoString, MisoString)
 
-import qualified Data.JSString
 import qualified Data.Text
 
 data Model
@@ -66,7 +66,7 @@ updateModel :: Action -> Model -> Effect Action Model
 updateModel NoOp m = noEff m
 
 updateModel FetchInitial m = m <# do
-  rsGet "main.journal"
+  rsRetrieve "main.journal"
   pure ImmediatelyParseJournal
 
 updateModel (GotValue (path, contents)) m =
@@ -180,18 +180,18 @@ viewModel Model {..} = div_ []
 
 viewAccountTree :: [Account] -> View Action
 viewAccountTree accounts =
-  div_ [ class_ "columns is-multiline account-tree" ]
-    $ map viewAccount accounts
+  div_ [ class_ "account-tree" ] $ map viewAccount accounts
 
 viewAccount :: Account -> View Action
 viewAccount acc@Account{..} =
   let
     offset = (parentAccounts acc & Prelude.length) - 1
-    size = 12 - offset
-    cls = "column is-" ++ show size ++ " is-offset-" ++ show offset
-  in div_ [ class_ $ toMisoString cls ]
+  in div_ []
     [ div_ [ class_ "columns" ]
-      [ div_ [ class_ "column" ] [ text $ toMisoString aname ]
+      [ div_ [ class_ "column name" ]
+        [ text $ toMisoString $ replicate offset "  "
+        , text $ toMisoString $ accountLeafName aname
+        ]
       , viewAmounts aebalance
       ]
     ]
@@ -202,7 +202,7 @@ viewAmounts (Mixed amts) =
 
 viewAmount :: Amount -> View Action
 viewAmount (Amount {..}) =
-  div_ []
+  div_ [ class_ "amount" ]
     [ text $ toMisoString acommodity
     , text $ pack " "
     , text $ pack $ show aquantity
@@ -210,12 +210,12 @@ viewAmount (Amount {..}) =
 
 
 foreign import javascript unsafe
-  "setGetHandler($1)"
+  "onGet($1)"
   onGet :: Callback (JSVal -> JSVal -> IO ()) -> IO ()
 
 foreign import javascript unsafe
-  "client.getFile($1).then(function (res) { console.log(res.data); getHandler($1, res.data) })"
-  rsGet :: JSString -> IO ()
+  "retrieveFile($1)"
+  rsRetrieve :: JSString -> IO ()
 
 foreign import javascript unsafe
   "client.storeFile('text/plain', $1, $2)"
@@ -247,6 +247,6 @@ getSub :: Sub Action Model
 getSub _ = \sink -> do
   onGet =<< do
     asyncCallback2 $ \p v -> do
-      let path = Data.Text.pack $ Data.JSString.unpack ((unsafeCoerce p)::JSString)
-      let contents = Data.Text.pack $ Data.JSString.unpack ((unsafeCoerce v)::JSString)
+      let path = textFromJSVal p
+      let contents = textFromJSVal v
       sink $ GotValue (path, contents)

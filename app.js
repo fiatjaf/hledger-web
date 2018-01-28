@@ -15,6 +15,15 @@ setTimeout(() => {
 
 window.client = rs.scope('/ledger/')
 
-window.setGetHandler = function (fn) {
+window.onGet = function (fn) {
   window.getHandler = fn
+}
+
+window.retrieveFile = function (path) {
+  window.client.getFile(path)
+    .then(res => {
+      if (res.data) {
+        window.getHandler(path, res.data)
+      }
+    })
 }
