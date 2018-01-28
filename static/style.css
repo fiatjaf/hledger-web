@@ -2,8 +2,32 @@ textarea {
   min-height: 72vh !important;
 }
 
-.rs-widget {
-  position: fixed;
+@media screen and (max-width: 1023px) {
+  .navbar {
+    display: flex;
+    flex-shrink: 2;
+    justify-content: space-between;
+  }
+
+  .navbar-menu {
+    background-color: inherit;
+    box-shadow: none;
+    padding: 0;
+    display: flex;
+  }
+}
+
+.rs-widget {}
+.rs-state-sign-in {
+  position: absolute;
   right: 0;
   top: 0;
+  min-width: 400px;
+}
+
+.account-tree {
+  margin-bottom: 12px !important;
+}
+.account-tree .column {
+  padding-top: 0;
 }
