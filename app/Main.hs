@@ -123,7 +123,7 @@ viewModel :: Model -> View Action
 viewModel Model {..} = div_ []
   [ nav_ [ class_ "navbar" ]
     [ div_ [ class_ "navbar-brand" ]
-      [ a_ [ class_ "navbar-item" ] [ text $ pack "d" ]
+      [ a_ [ class_ "navbar-item" ] [ text $ pack "hledger Playground" ]
       ]
     , div_ [ class_ "navbar-menu" ]
       [ div_ [ class_ "navbar-start" ] []
@@ -166,17 +166,20 @@ viewModel Model {..} = div_ []
               , viewAccountTree $ Prelude.tail $ accountTree jrnl
               ]
             , div_ []
-              [ h4_ [ class_ "title is-4" ] [ text $ pack "first transaction" ]
+              [ h4_ [ class_ "title is-4" ] [ text $ pack "Transactions" ]
               , ul_ []
-                [ case journalTransactionAt jrnl 1 of
-                  Nothing -> text $ pack ""
-                  Just txn -> pre_ [] [ text $ toMisoString (showTransaction txn) ]
-                ]
+                $ map viewTransaction (jtxns jrnl)
               ]
             ]
       ]
     ]
   ]
+
+viewTransaction :: Transaction -> View Action
+viewTransaction txn =
+  li_ []
+    [ pre_ [] [ text $ toMisoString (showTransaction txn) ]
+    ]
 
 viewAccountTree :: [Account] -> View Action
 viewAccountTree accounts =
