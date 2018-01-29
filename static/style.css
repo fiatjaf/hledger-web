@@ -26,6 +26,10 @@ textarea {
   min-width: 400px;
 }
 
+.save {
+  margin: 12px;
+}
+
 .account-tree {
   margin-top: 6px !important;
   margin-bottom: 10px !important;

@@ -9,6 +9,7 @@ import Control.Concurrent
 import Data.Text hiding (pack, map)
 import Data.Function
 import Data.JSString.Text (textFromJSVal)
+import JavaScript.Array.Internal
 import Hledger.Read (readJournal)
 import Hledger.Data.Account
 import Hledger.Data.AccountName
@@ -16,6 +17,7 @@ import Hledger.Data.Journal
 import Hledger.Data.Transaction
 import Hledger.Data.Types
 import GHCJS.Types
+import GHCJS.Foreign
 import GHCJS.Foreign.Callback
 import Miso
 import Miso.String (pack, toMisoString, fromMisoString, MisoString)
@@ -24,9 +26,12 @@ import qualified Data.Text
 
 data Model
   = Model
-    { journalSource :: MisoString
-    , currentlySaved :: MisoString
-    , journal :: Maybe Journal
+    { currentJournal :: (MisoString, MisoString)
+    , journalsAvailable :: [MisoString]
+    , currentlySaved :: (MisoString, MisoString)
+    , parsedJournal :: Maybe Journal
+    , logged :: Bool
+    , showingFileList :: Bool
     , status :: Maybe MisoString
     , err :: Maybe MisoString
     , waitingDebounced :: Int
@@ -38,23 +43,31 @@ main = do
   where
     initialAction = FetchInitial
     model         = Model
-      { journalSource    = initialJournal
-      , currentlySaved   = initialJournal
-      , journal          = Nothing
-      , status           = Nothing
-      , err              = Nothing
-      , waitingDebounced = 0
+      { currentJournal    = ("temp.journal", initialJournal)
+      , journalsAvailable = []
+      , currentlySaved    = ("temp.journal", initialJournal)
+      , parsedJournal     = Nothing
+      , logged            = False
+      , showingFileList   = False
+      , status            = Nothing
+      , err               = Nothing
+      , waitingDebounced  = 0
       }
     update        = updateModel
     view          = viewModel
     events        = defaultEvents
     mountPoint    = Nothing
-    subs          = [ getSub ]
+    subs          = [ getSub, listSub, loggedSub ]
 
 data Action
   = NoOp
   | FetchInitial
+  | GotLogged Bool
   | GotValue (Text, Text)
+  | GotListing [Text]
+  | SetFileName MisoString
+  | OpenFile MisoString
+  | ShowFileList Bool
   | SetUnparsedJournal MisoString
   | MaybeParseJournal
   | ImmediatelyParseJournal
@@ -65,65 +78,89 @@ data Action
 updateModel :: Action -> Model -> Effect Action Model
 updateModel NoOp m = noEff m
 
-updateModel FetchInitial m = m <# do
-  rsRetrieve "main.journal"
+updateModel FetchInitial m@Model{..} = m <# do
+  rsList
+  rsRetrieve $ fst currentJournal
   pure ImmediatelyParseJournal
 
-updateModel (GotValue (path, contents)) m =
-  let jnrl = toMisoString contents
+updateModel (GotValue (p, contents)) m =
+  let
+    jnrl = toMisoString contents
+    path = toMisoString p
   in m
-    { journalSource = jnrl
-    , currentlySaved = jnrl
+    { currentJournal = (path, jnrl)
+    , currentlySaved = (path, jnrl)
+    , showingFileList = False
     } <# do
       pure ImmediatelyParseJournal
 
-updateModel (SetUnparsedJournal uj) m@Model{..} =
-  m
-    { journalSource = uj
-    , waitingDebounced = waitingDebounced + 1
-    , status = Just $ toMisoString $ Data.Text.concat
-      [ "waiting to parse..."
-      , Data.Text.pack $ show $ waitingDebounced + 1
-      ]
-    } <# do
-      threadDelay 800000 -- 0.8s
-      pure MaybeParseJournal
+updateModel (GotLogged b) m = noEff m { logged = b }
 
-updateModel MaybeParseJournal (Model {..}) =
-  Model { waitingDebounced = waitingDebounced - 1, .. }
-    <# do
-      if waitingDebounced == 1
-        then pure ImmediatelyParseJournal
-        else pure NoOp
+updateModel (GotListing jnrls) m = noEff m
+  { journalsAvailable = traceShowId $ map toMisoString jnrls
+  }
 
-updateModel ImmediatelyParseJournal (Model {..}) =
-  Model { status = Just $ pack "parsing journal...", .. }
-    <# do
-      ParsedJournal <$> parseJournal journalSource
+updateModel (SetFileName name) m@Model{..} = noEff m
+  { currentJournal = (name, snd currentJournal)
+  }
+
+updateModel (ShowFileList b) m = noEff m { showingFileList = b }
+
+updateModel (OpenFile name) m = m <# do
+  rsRetrieve $ fromMisoString name
+  pure NoOp
+
+updateModel (SetUnparsedJournal uj) m@Model{..} = m
+  { currentJournal = (fst currentJournal, uj)
+  , waitingDebounced = waitingDebounced + 1
+  , status = Just $ toMisoString $ Data.Text.concat
+    [ "waiting to parse..."
+    , Data.Text.pack $ show $ waitingDebounced + 1
+    ]
+  } <# do
+    threadDelay 800000 -- 0.8s
+    pure MaybeParseJournal
+
+updateModel MaybeParseJournal m@Model{..} = m
+  { waitingDebounced = waitingDebounced - 1
+  } <# do
+    if waitingDebounced == 1
+      then pure ImmediatelyParseJournal
+      else pure NoOp
+
+updateModel ImmediatelyParseJournal m@Model{..} = m
+  { status = Just $ pack "parsing journal..."
+  } <# do
+    ParsedJournal <$> parseJournal (snd currentJournal)
 
 updateModel (ParsedJournal res) m = noEff updated
   where
     updated = case res of
       Left err -> m
         { err = Just $ pack err
-        , journal = Nothing
+        , parsedJournal = Nothing
         , status = Just $ pack "encountered error while parsing."
         }
       Right jrnl -> m
-        { journal = Just jrnl
+        { parsedJournal = Just jrnl
         , err = Nothing
         , status = Just $ pack "finished parsing!"
         }
 
-updateModel SaveCurrent (Model {..}) = Model {..} <# do
-  rsPut "main.journal" (fromMisoString journalSource)
-  pure NoOp
+updateModel SaveCurrent m@Model{..} = m
+  { currentlySaved = currentJournal
+  } <# do
+    rsPut (fst currentJournal) (fromMisoString $ snd currentJournal)
+    rsList
+    pure NoOp
 
 viewModel :: Model -> View Action
 viewModel Model {..} = div_ []
   [ nav_ [ class_ "navbar" ]
     [ div_ [ class_ "navbar-brand" ]
-      [ a_ [ class_ "navbar-item" ] [ text $ pack "hledger Playground" ]
+      [ a_ [ class_ "navbar-item" ]
+        [ h1_ [ class_ "title is-1" ] [ text $ pack "hledger" ]
+        ]
       ]
     , div_ [ class_ "navbar-menu" ]
       [ div_ [ class_ "navbar-start" ] []
@@ -150,15 +187,33 @@ viewModel Model {..} = div_ []
         [ textarea_
           [ onInput SetUnparsedJournal
           , class_ "textarea"
-          ] [ text journalSource ]
-        , button_
-          [ class_ "button is-primary"
-          , disabled_ $ currentlySaved == journalSource
-          , onClick SaveCurrent
-          ] [ text $ pack "Save" ]
+          ] [ text $ snd currentJournal ]
+        , div_ [ class_ "columns save" ]
+          [ div_ [ class_ "column" ]
+            [ button_
+              [ class_ "button is-info"
+              , disabled_ $ not logged
+              , onClick (ShowFileList True)
+              ] [ text $ pack "Open" ]
+            ]
+          , div_ [ class_ "column" ]
+            [ input_
+              [ class_ "input"
+              , value_ $ fst currentJournal
+              , onInput SetFileName
+              ] []
+            ]
+          , div_ [ class_ "column is-narrow" ]
+            [ button_
+              [ class_ "button is-primary"
+              , disabled_ $ currentlySaved == currentJournal
+              , onClick SaveCurrent
+              ] [ text $ pack "Save" ]
+            ]
+          ]
         ]
       , div_ [ class_ "column" ]
-        $ case journal of
+        $ case parsedJournal of
           Nothing -> []
           Just jrnl ->
             [ div_ []
@@ -172,6 +227,19 @@ viewModel Model {..} = div_ []
               ]
             ]
       ]
+    ]
+  , div_ [ classList_ [ ("modal", True), ("is-active", showingFileList) ] ]
+    [ div_ [ class_ "modal-background", onClick (ShowFileList False) ] []
+    , div_ [ class_ "modal-content" ]
+      [ div_ [ class_ "box" ]
+        [ h2_ [ class_ "title is-2" ] [ text $ pack "Files on remoteStorage" ]
+        , ul_ []
+          $ map
+            (\jn -> li_ [] [ a_ [ onClick (OpenFile jn) ] [ text jn ]])
+            journalsAvailable
+        ]
+      ]
+    , div_ [ class_ "modal-close", onClick (ShowFileList False) ] []
     ]
   ]
 
@@ -213,12 +281,24 @@ viewAmount (Amount {..}) =
 
 
 foreign import javascript unsafe
+  "onLogged($1)"
+  onLogged :: Callback (JSVal -> IO ()) -> IO ()
+
+foreign import javascript unsafe
   "onGet($1)"
   onGet :: Callback (JSVal -> JSVal -> IO ()) -> IO ()
 
 foreign import javascript unsafe
   "retrieveFile($1)"
   rsRetrieve :: JSString -> IO ()
+
+foreign import javascript unsafe
+  "onList($1)"
+  onList :: Callback (JSVal -> IO ()) -> IO ()
+
+foreign import javascript unsafe
+  "listFiles()"
+  rsList :: IO ()
 
 foreign import javascript unsafe
   "client.storeFile('text/plain', $1, $2)"
@@ -253,3 +333,14 @@ getSub _ = \sink -> do
       let path = textFromJSVal p
       let contents = textFromJSVal v
       sink $ GotValue (path, contents)
+
+listSub :: Sub Action Model
+listSub _ = \sink -> do
+  onList =<< do
+    asyncCallback1 $ \files -> do
+      sink $ GotListing $ map textFromJSVal $ toList $ SomeJSArray files
+
+loggedSub :: Sub Action Model
+loggedSub _ = \sink -> do
+  onLogged =<< do
+    asyncCallback1 $ \logged -> sink $ GotLogged $ isTruthy logged
