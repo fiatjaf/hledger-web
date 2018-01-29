@@ -48,3 +48,12 @@ textarea {
   .account-tree .amount {
     text-align: right;
   }
+
+.transaction-list {}
+  .transaction-list pre {
+    padding: 8px;
+  }
+
+.what {
+  margin-top: 12px;
+}

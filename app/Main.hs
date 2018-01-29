@@ -3,7 +3,6 @@
 {-# LANGUAGE DeriveGeneric #-}
 module Main where
 
-import Debug.Trace
 import Prelude hiding (unlines, replicate)
 import Control.Concurrent
 import Data.Text hiding (pack, map)
@@ -97,7 +96,7 @@ updateModel (GotValue (p, contents)) m =
 updateModel (GotLogged b) m = noEff m { logged = b }
 
 updateModel (GotListing jnrls) m = noEff m
-  { journalsAvailable = traceShowId $ map toMisoString jnrls
+  { journalsAvailable = map toMisoString jnrls
   }
 
 updateModel (SetFileName name) m@Model{..} = noEff m
@@ -159,7 +158,7 @@ viewModel Model {..} = div_ []
   [ nav_ [ class_ "navbar" ]
     [ div_ [ class_ "navbar-brand" ]
       [ a_ [ class_ "navbar-item" ]
-        [ h1_ [ class_ "title is-1" ] [ text $ pack "hledger" ]
+        [ h1_ [ class_ "title is-1" ] [ text $ pack "hledger interactive" ]
         ]
       ]
     , div_ [ class_ "navbar-menu" ]
@@ -220,10 +219,37 @@ viewModel Model {..} = div_ []
               [ h4_ [ class_ "title is-4" ] [ text $ pack "Account Balances" ]
               , viewAccountTree $ Prelude.tail $ accountTree jrnl
               ]
-            , div_ []
+            , div_ [ class_ "transaction-list" ]
               [ h4_ [ class_ "title is-4" ] [ text $ pack "Transactions" ]
               , ul_ []
                 $ map viewTransaction (jtxns jrnl)
+              ]
+            , div_ [ class_ "what" ]
+              [ h4_ [ class_ "title is-4" ] [ text $ pack "What is this?" ]
+              , p_ []
+                [ a_
+                  [ href_ "http://hledger.org/"
+                  , target_ "_blank"
+                  ] [ text $ pack "hledger" ]
+                ]
+              , p_ []
+                [ a_
+                  [ href_ "https://remotestorage.io/"
+                  , target_ "_blank"
+                  ] [ text $ pack "remoteStorage" ]
+                ]
+              , p_ []
+                [ a_
+                  [ href_ "https://github.com/fiatjaf/d"
+                  , target_ "_blank"
+                  ] [ text $ pack "source" ]
+                ]
+              , p_ []
+                [ a_
+                  [ href_ "https://fiatjaf.alhur.es"
+                  , target_ "_blank"
+                  ] [ text $ pack "author" ]
+                ]
               ]
             ]
       ]
@@ -232,7 +258,7 @@ viewModel Model {..} = div_ []
     [ div_ [ class_ "modal-background", onClick (ShowFileList False) ] []
     , div_ [ class_ "modal-content" ]
       [ div_ [ class_ "box" ]
-        [ h2_ [ class_ "title is-2" ] [ text $ pack "Files on remoteStorage" ]
+        [ h4_ [ class_ "title is-4" ] [ text $ pack "Files on remoteStorage" ]
         , ul_ []
           $ map
             (\jn -> li_ [] [ a_ [ onClick (OpenFile jn) ] [ text jn ]])
