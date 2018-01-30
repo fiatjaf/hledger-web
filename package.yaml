@@ -2,9 +2,9 @@ name:                d
 version:             0.1.0.0
 github:              "fiatjaf/d"
 license:             BSD3
-author:              "Giovanni T. Parra"
+author:              "fiatjaf"
 maintainer:          "fiatjaf@gmail.com"
-copyright:           "Giovanni T. Parra"
+copyright:           "fiatjaf"
 
 description:         Please see the README on Github at <https://github.com/fiatjaf/d#readme>
 

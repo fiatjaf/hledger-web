@@ -2,8 +2,8 @@ const RemoteStorage = require('remotestoragejs')
 const Widget = require('remotestorage-widget')
 
 let rs = new RemoteStorage({logging: false})
-rs.access.claim('ledger', 'rw')
-rs.caching.enable('/ledger/')
+rs.access.claim('finance', 'rw')
+rs.caching.enable('/finance/ledger/')
 
 window.onLogged = function (fn) {
   rs.on('connected', () => {
@@ -22,7 +22,7 @@ setTimeout(() => {
   widget.attach('rs-widget')
 }, 1000)
 
-window.client = rs.scope('/ledger/')
+window.client = rs.scope('/finance/ledger/journals/')
 
 window.onGet = function (fn) {
   window.getHandler = fn
